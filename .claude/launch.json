@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "/Users/gscmac/.nvm/versions/node/v22.12.0/bin/node",
+      "runtimeArgs": [
+        "/Users/gscmac/Desktop/voice-ai/frontend/node_modules/vite/bin/vite.js",
+        "/Users/gscmac/Desktop/voice-ai/frontend",
+        "--port",
+        "5173"
+      ],
+      "port": 5173
+    }
+  ]
+}

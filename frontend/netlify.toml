@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  VITE_BACKEND_HTTP_URL = "https://edweisser-voice-ai.fly.dev"
+  VITE_BACKEND_WS_URL = "wss://edweisser-voice-ai.fly.dev"
