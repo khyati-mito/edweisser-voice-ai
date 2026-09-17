@@ -16,7 +16,8 @@ export function useVoiceCall({ sessionId, onUserPartial, onUserFinal, onAssistan
   const playerRef = useRef(null);
 
   const startCall = useCallback(async () => {
-    const ws = new WebSocket(`${BACKEND_WS_URL}/voice?session_id=${encodeURIComponent(sessionId)}`);
+    const wsUrl = `${BACKEND_WS_URL}/voice?session_id=${encodeURIComponent(sessionId)}`;
+    const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
@@ -38,8 +39,12 @@ export function useVoiceCall({ sessionId, onUserPartial, onUserFinal, onAssistan
 
     await new Promise((resolve, reject) => {
       ws.onopen = resolve;
-      ws.onerror = () => reject(new Error('voice websocket failed to connect'));
+      ws.onerror = () => reject(new Error(`voice websocket failed to connect (${wsUrl})`));
+      ws.onclose = (event) => {
+        reject(new Error(`voice websocket closed before opening (code ${event.code}: ${event.reason || 'no reason given'}) -- url ${wsUrl}`));
+      };
     });
+    ws.onclose = null;
 
     // Explicit constraints rather than relying on browser defaults: without
     // echo cancellation, the mic picks up the bot's own voice from your

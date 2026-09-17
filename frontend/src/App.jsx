@@ -98,7 +98,7 @@ function App() {
     } else {
       startCall().catch((err) => {
         console.error('Failed to start voice call', err);
-        appendMessage('assistant', 'Could not start the voice call — check mic permissions.');
+        appendMessage('assistant', `Could not start the voice call — ${err.name || 'Error'}: ${err.message || err}`);
       });
     }
   }, [isCallActive, startCall, endCall, appendMessage]);
