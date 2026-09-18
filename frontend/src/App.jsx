@@ -14,6 +14,15 @@ function App() {
   const [draft, setDraft] = useState('');
   const [partialText, setPartialText] = useState('');
   const [sending, setSending] = useState(false);
+  // startCall() is async (websocket connect -> mic permission -> audio
+  // worklet setup) and only flips isCallActive true at the very end. The
+  // server starts speaking as soon as the websocket connects, well before
+  // that -- so without this, there's a real window where the bot is already
+  // talking but the text box still looks enabled, letting a typed message
+  // fire off a completely separate /chat reply while the voice one is still
+  // in flight. This disables input the instant "Talk" is clicked, not once
+  // the call finishes connecting.
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
     const el = chatLogRef.current;
@@ -96,10 +105,13 @@ function App() {
     if (isCallActive) {
       endCall();
     } else {
-      startCall().catch((err) => {
-        console.error('Failed to start voice call', err);
-        appendMessage('assistant', `Could not start the voice call — ${err.name || 'Error'}: ${err.message || err}`);
-      });
+      setIsConnecting(true);
+      startCall()
+        .catch((err) => {
+          console.error('Failed to start voice call', err);
+          appendMessage('assistant', `Could not start the voice call — ${err.name || 'Error'}: ${err.message || err}`);
+        })
+        .finally(() => setIsConnecting(false));
     }
   }, [isCallActive, startCall, endCall, appendMessage]);
 
@@ -123,9 +135,9 @@ function App() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Type a message…"
-          disabled={isCallActive}
+          disabled={isCallActive || isConnecting}
         />
-        <button type="submit" disabled={isCallActive || sending}>
+        <button type="submit" disabled={isCallActive || isConnecting || sending}>
           Send
         </button>
         <MicButton isActive={isCallActive} onClick={handleMicClick} />

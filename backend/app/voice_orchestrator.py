@@ -55,11 +55,26 @@ class VoiceCall:
             self.state = "SPEAKING"
             self._tts_task = asyncio.create_task(self._speak(GREETING_TEXT))
 
+        relay_task = asyncio.create_task(self._relay_client_audio())
+        events_task = asyncio.create_task(self._consume_stt_events())
         try:
-            await asyncio.gather(self._relay_client_audio(), self._consume_stt_events())
-        except Exception as exc:
-            logger.warning("Voice call loop failed: %s", exc, exc_info=True)
-            await self._safe_send_json({"type": "error", "message": str(exc)})
+            # asyncio.gather() waits for BOTH to finish, so if the client
+            # disconnects (ending _relay_client_audio) while _consume_stt_events
+            # is still happily running against Sarvam, the whole session would
+            # linger in the background instead of tearing down. Whichever
+            # finishes first, cancel the other immediately.
+            done, pending = await asyncio.wait(
+                {relay_task, events_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                if task.cancelled():
+                    continue
+                exc = task.exception()
+                if exc:
+                    logger.warning("Voice call loop failed: %s", exc, exc_info=exc)
+                    await self._safe_send_json({"type": "error", "message": str(exc)})
         finally:
             if self._tts_task:
                 self._tts_task.cancel()
