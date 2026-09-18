@@ -123,6 +123,7 @@ class VoiceCall:
         speech_text = to_speech_text(text)
         tts = SarvamTTSSession(language_code=self._last_language)
         chunks_sent = 0
+        bytes_sent = 0
         try:
             await tts.connect()
             for sentence in (s for s in SENTENCE_SPLIT_RE.split(speech_text) if s.strip()):
@@ -131,14 +132,28 @@ class VoiceCall:
             async for chunk in tts.audio_chunks():
                 await self.client_ws.send_bytes(chunk)
                 chunks_sent += 1
+                bytes_sent += len(chunk)
+
+            if chunks_sent == 0:
+                logger.warning("TTS produced zero audio chunks (language=%s) for: %r", self._last_language, speech_text)
+            else:
+                # Sarvam streams audio to us far faster than real-time (TTS
+                # generation is much quicker than the clip's own playback
+                # duration), but the browser still takes the full duration to
+                # actually play it. Without this, self.state flips back to
+                # LISTENING as soon as we've *sent* everything, so a barge-in
+                # during the tail of playback never fires -- the old reply
+                # just plays out to the end while a new one queues up behind
+                # it. Staying in SPEAKING for the estimated playback time
+                # keeps barge-in live for as long as the user can actually
+                # hear us talking.
+                playback_seconds = bytes_sent / (2 * 16000)  # PCM16 mono 16kHz
+                await asyncio.sleep(playback_seconds)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("TTS failed (language=%s): %s", self._last_language, exc, exc_info=True)
             await self._safe_send_json({"type": "error", "message": f"voice playback failed: {exc}"})
-        else:
-            if chunks_sent == 0:
-                logger.warning("TTS produced zero audio chunks (language=%s) for: %r", self._last_language, speech_text)
         finally:
             await tts.close()
             if self.state == "SPEAKING":
