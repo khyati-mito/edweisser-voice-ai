@@ -74,6 +74,15 @@
   opacity: 0.6;
 }
 
+.chat-message__voice-tag {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.55;
+  margin-bottom: 0.15rem;
+}
+
 .chat-message__bubble a {
   color: inherit;
   text-decoration: underline;

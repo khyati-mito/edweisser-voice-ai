@@ -4,13 +4,17 @@ import { PcmAudioPlayer } from '../audio/audio-player';
 const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:8000';
 
 // Owns the mic capture, the /voice websocket, and the playback queue for one
-// continuous, voice-only call -- like a phone call, no text is ever rendered
-// from this. Talks to the backend in the app's own wire protocol: binary
-// frames both ways are PCM16 audio; JSON frames carry
-// user_partial/user_final/assistant_text_delta/assistant_done/interrupt/error,
-// which this hook only uses to derive a coarse call status
-// ('listening' | 'thinking' | 'speaking') for the caller to display.
-export function useVoiceCall({ sessionId, onStatusChange, onError }) {
+// continuous, voice-only call -- like a phone call, nothing is rendered
+// live from this while the call is up. Talks to the backend in the app's
+// own wire protocol: binary frames both ways are PCM16 audio; JSON frames
+// carry user_partial/user_final/assistant_text_delta/assistant_done/
+// interrupt/error. Beyond deriving a coarse call status ('listening' |
+// 'thinking' | 'speaking'), each finalized turn (user_final, assistant_done)
+// is also handed to onTranscript so the caller can fold the call into the
+// same chat log used for typed messages once it's over -- the shared
+// backend conversation history already includes it either way, so this is
+// just making that visible.
+export function useVoiceCall({ sessionId, onStatusChange, onError, onTranscript }) {
   const [isCallActive, setIsCallActive] = useState(false);
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -51,10 +55,16 @@ export function useVoiceCall({ sessionId, onStatusChange, onError }) {
       if (typeof event.data === 'string') {
         const msg = JSON.parse(event.data);
         if (msg.type === 'user_partial') onStatusChange?.('listening');
-        else if (msg.type === 'user_final') onStatusChange?.('thinking');
-        else if (msg.type === 'assistant_text_delta') onStatusChange?.('speaking');
-        else if (msg.type === 'assistant_done') onStatusChange?.('listening');
-        else if (msg.type === 'interrupt') {
+        else if (msg.type === 'user_final') {
+          onStatusChange?.('thinking');
+          if (msg.text?.trim()) onTranscript?.({ role: 'user', text: msg.text });
+        } else if (msg.type === 'assistant_text_delta') onStatusChange?.('speaking');
+        else if (msg.type === 'assistant_done') {
+          onStatusChange?.('listening');
+          if (msg.text?.trim()) {
+            onTranscript?.({ role: 'assistant', text: msg.text, demoActions: msg.demo_actions });
+          }
+        } else if (msg.type === 'interrupt') {
           player.clear();
           onStatusChange?.('listening');
         } else if (msg.type === 'error') onError?.(msg.message);

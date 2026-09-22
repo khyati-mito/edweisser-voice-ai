@@ -26,8 +26,8 @@ function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  const appendMessage = useCallback((role, text, demoActions) => {
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role, text, demoActions }]);
+  const appendMessage = useCallback((role, text, demoActions, viaVoice) => {
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role, text, demoActions, viaVoice }]);
   }, []);
 
   // Edweisser greets first, before the user says anything.
@@ -46,11 +46,20 @@ function App() {
 
   const handleStatusChange = useCallback((status) => setCallStatus(status), []);
   const handleVoiceError = useCallback((message) => setVoiceError(message), []);
+  // Folds each finalized voice-call turn into the same chat log used for
+  // typed messages, tagged viaVoice so ChatMessage can show it came from a
+  // call -- the call screen itself still shows nothing live, this only
+  // back-fills the log once a turn is done.
+  const handleVoiceTranscript = useCallback(
+    ({ role, text, demoActions }) => appendMessage(role, text, demoActions, true),
+    [appendMessage],
+  );
 
   const { isCallActive, startCall, endCall } = useVoiceCall({
     sessionId: sessionIdRef.current,
     onStatusChange: handleStatusChange,
     onError: handleVoiceError,
+    onTranscript: handleVoiceTranscript,
   });
 
   const handleSend = useCallback(
@@ -112,7 +121,7 @@ function App() {
         <>
           <main className="chat-log" ref={chatLogRef}>
             {messages.map((m) => (
-              <ChatMessage key={m.id} role={m.role} text={m.text} demoActions={m.demoActions} />
+              <ChatMessage key={m.id} role={m.role} text={m.text} demoActions={m.demoActions} viaVoice={m.viaVoice} />
             ))}
           </main>
 

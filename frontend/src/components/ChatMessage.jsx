@@ -32,10 +32,11 @@ function renderFormatted(text) {
   return parts;
 }
 
-export function ChatMessage({ role, text, pending, demoActions }) {
+export function ChatMessage({ role, text, pending, demoActions, viaVoice }) {
   return (
     <div className={`chat-message chat-message--${role}`}>
       <div className="chat-message__bubble">
+        {viaVoice && <span className="chat-message__voice-tag">via call</span>}
         {renderFormatted(text)}
         {pending && <span className="chat-message__pending">…</span>}
         {demoActions?.length > 0 && (
