@@ -25,7 +25,7 @@ class SarvamTTSSession:
     PCM16 audio chunks -> audio_chunks().
     """
 
-    def __init__(self, language_code: str = "hi-IN", speaker: str = "shubh", model: str = "bulbul:v3"):
+    def __init__(self, language_code: str = "hi-IN", speaker: str = "ritu", model: str = "bulbul:v3"):
         self._language_code = language_code
         self._speaker = speaker
         self._model = model

@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .chatbot import GREETING_TEXT, ensure_session_started, get_reply
@@ -13,6 +14,8 @@ _app_logger = logging.getLogger("voice_ai")
 _app_logger.setLevel(logging.INFO)
 _app_logger.addHandler(_log_handler)
 _app_logger.propagate = False
+
+logger = logging.getLogger("voice_ai.main")
 
 app = FastAPI()
 
@@ -41,7 +44,22 @@ async def chat_start(req: StartRequest):
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    reply = await get_reply(req.session_id, req.text)
+    try:
+        reply = await get_reply(req.session_id, req.text)
+    except Exception as exc:
+        # An uncaught exception's default error response doesn't get the
+        # CORSMiddleware's headers applied, which the browser then reports
+        # as a confusing CORS failure instead of the real error -- return a
+        # normal response instead so the actual problem is visible.
+        logger.warning("get_reply failed: %s", exc, exc_info=True)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "reply": "Sorry, I'm having trouble reaching the AI service right now. Please try again in a moment.",
+                "demo_actions": [],
+                "error": str(exc),
+            },
+        )
     return {"reply": reply.text, "demo_actions": reply.demo_actions}
 
 

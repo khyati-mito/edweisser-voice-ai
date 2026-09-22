@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
+import { CallScreen } from './components/CallScreen';
 import { ChatMessage } from './components/ChatMessage';
 import { MicButton } from './components/MicButton';
 import { useVoiceCall } from './hooks/useVoiceCall';
@@ -12,26 +13,19 @@ function App() {
   const chatLogRef = useRef(null);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
-  const [partialText, setPartialText] = useState('');
   const [sending, setSending] = useState(false);
   // startCall() is async (websocket connect -> mic permission -> audio
-  // worklet setup) and only flips isCallActive true at the very end. The
-  // server starts speaking as soon as the websocket connects, well before
-  // that -- so without this, there's a real window where the bot is already
-  // talking but the text box still looks enabled, letting a typed message
-  // fire off a completely separate /chat reply while the voice one is still
-  // in flight. This disables input the instant "Talk" is clicked, not once
-  // the call finishes connecting.
+  // worklet setup); isConnecting covers that window so the UI can show
+  // "Connecting..." before the call is actually live.
   const [isConnecting, setIsConnecting] = useState(false);
+  const [callStatus, setCallStatus] = useState('listening');
+  const [voiceError, setVoiceError] = useState(null);
 
   useEffect(() => {
     const el = chatLogRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, partialText]);
+  }, [messages]);
 
-  // Typed messages and voice-transcribed messages both land in this one
-  // array — that's what makes voice feel like another input mode for the
-  // same chat, rather than a separate bolted-on feature.
   const appendMessage = useCallback((role, text, demoActions) => {
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role, text, demoActions }]);
   }, []);
@@ -50,28 +44,12 @@ function App() {
       .catch(() => appendMessage('assistant', "Hi, I'm Edweisser. (Couldn't reach the backend just now.)"));
   }, [appendMessage]);
 
-  const handleUserPartial = useCallback((text) => setPartialText(text), []);
-  const handleUserFinal = useCallback(
-    (text) => {
-      setPartialText('');
-      appendMessage('user', text);
-    },
-    [appendMessage],
-  );
-  const handleAssistantText = useCallback(
-    (text, demoActions) => appendMessage('assistant', text, demoActions),
-    [appendMessage],
-  );
-  const handleVoiceError = useCallback(
-    (message) => appendMessage('assistant', `Voice error: ${message}`),
-    [appendMessage],
-  );
+  const handleStatusChange = useCallback((status) => setCallStatus(status), []);
+  const handleVoiceError = useCallback((message) => setVoiceError(message), []);
 
   const { isCallActive, startCall, endCall } = useVoiceCall({
     sessionId: sessionIdRef.current,
-    onUserPartial: handleUserPartial,
-    onUserFinal: handleUserFinal,
-    onAssistantText: handleAssistantText,
+    onStatusChange: handleStatusChange,
     onError: handleVoiceError,
   });
 
@@ -105,15 +83,19 @@ function App() {
     if (isCallActive) {
       endCall();
     } else {
+      setVoiceError(null);
+      setCallStatus('listening');
       setIsConnecting(true);
       startCall()
         .catch((err) => {
           console.error('Failed to start voice call', err);
-          appendMessage('assistant', `Could not start the voice call — ${err.name || 'Error'}: ${err.message || err}`);
+          setVoiceError(`Could not start the voice call — ${err.name || 'Error'}: ${err.message || err}`);
         })
         .finally(() => setIsConnecting(false));
     }
-  }, [isCallActive, startCall, endCall, appendMessage]);
+  }, [isCallActive, startCall, endCall]);
+
+  const onCall = isCallActive || isConnecting;
 
   return (
     <div className="app">
@@ -122,26 +104,33 @@ function App() {
         <p>Type or talk — same conversation either way.</p>
       </header>
 
-      <main className="chat-log" ref={chatLogRef}>
-        {messages.map((m) => (
-          <ChatMessage key={m.id} role={m.role} text={m.text} demoActions={m.demoActions} />
-        ))}
-        {partialText && <ChatMessage role="user" text={partialText} pending />}
-      </main>
+      {voiceError && <div className="error-banner">{voiceError}</div>}
 
-      <form className="composer" onSubmit={handleSend}>
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Type a message…"
-          disabled={isCallActive || isConnecting}
-        />
-        <button type="submit" disabled={isCallActive || isConnecting || sending}>
-          Send
-        </button>
-        <MicButton isActive={isCallActive} onClick={handleMicClick} />
-      </form>
+      {onCall ? (
+        <CallScreen status={isConnecting ? 'connecting' : callStatus} onEndCall={endCall} />
+      ) : (
+        <>
+          <main className="chat-log" ref={chatLogRef}>
+            {messages.map((m) => (
+              <ChatMessage key={m.id} role={m.role} text={m.text} demoActions={m.demoActions} />
+            ))}
+          </main>
+
+          <form className="composer" onSubmit={handleSend}>
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Type a message…"
+              disabled={sending}
+            />
+            <button type="submit" disabled={sending}>
+              Send
+            </button>
+            <MicButton isActive={false} onClick={handleMicClick} />
+          </form>
+        </>
+      )}
     </div>
   );
 }

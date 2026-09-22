@@ -4,18 +4,41 @@ import { PcmAudioPlayer } from '../audio/audio-player';
 const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:8000';
 
 // Owns the mic capture, the /voice websocket, and the playback queue for one
-// continuous call. Talks to the backend in the app's own wire protocol:
-// binary frames both ways are PCM16 audio; JSON frames carry
-// user_partial/user_final/assistant_text/interrupt/error.
-export function useVoiceCall({ sessionId, onUserPartial, onUserFinal, onAssistantText, onError }) {
+// continuous, voice-only call -- like a phone call, no text is ever rendered
+// from this. Talks to the backend in the app's own wire protocol: binary
+// frames both ways are PCM16 audio; JSON frames carry
+// user_partial/user_final/assistant_text_delta/assistant_done/interrupt/error,
+// which this hook only uses to derive a coarse call status
+// ('listening' | 'thinking' | 'speaking') for the caller to display.
+export function useVoiceCall({ sessionId, onStatusChange, onError }) {
   const [isCallActive, setIsCallActive] = useState(false);
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
   const workletNodeRef = useRef(null);
   const micStreamRef = useRef(null);
   const playerRef = useRef(null);
+  // Set right before we close the websocket ourselves, so the onclose
+  // handler below can tell "the user ended the call" apart from "the
+  // connection died out from under us" (Sarvam STT inactivity timeout, a
+  // network blip, a backend restart, ...). Without this distinction, an
+  // unexpected close left isCallActive stuck true forever.
+  const intentionalCloseRef = useRef(false);
+
+  const teardown = useCallback(() => {
+    wsRef.current = null;
+    workletNodeRef.current?.disconnect();
+    workletNodeRef.current = null;
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    playerRef.current?.close();
+    playerRef.current = null;
+    setIsCallActive(false);
+  }, []);
 
   const startCall = useCallback(async () => {
+    intentionalCloseRef.current = false;
     const wsUrl = `${BACKEND_WS_URL}/voice?session_id=${encodeURIComponent(sessionId)}`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
@@ -27,11 +50,14 @@ export function useVoiceCall({ sessionId, onUserPartial, onUserFinal, onAssistan
     ws.onmessage = (event) => {
       if (typeof event.data === 'string') {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'user_partial') onUserPartial?.(msg.text);
-        else if (msg.type === 'user_final') onUserFinal?.(msg.text);
-        else if (msg.type === 'assistant_text') onAssistantText?.(msg.text, msg.demo_actions);
-        else if (msg.type === 'interrupt') player.clear();
-        else if (msg.type === 'error') onError?.(msg.message);
+        if (msg.type === 'user_partial') onStatusChange?.('listening');
+        else if (msg.type === 'user_final') onStatusChange?.('thinking');
+        else if (msg.type === 'assistant_text_delta') onStatusChange?.('speaking');
+        else if (msg.type === 'assistant_done') onStatusChange?.('listening');
+        else if (msg.type === 'interrupt') {
+          player.clear();
+          onStatusChange?.('listening');
+        } else if (msg.type === 'error') onError?.(msg.message);
       } else {
         player.enqueue(event.data);
       }
@@ -44,7 +70,15 @@ export function useVoiceCall({ sessionId, onUserPartial, onUserFinal, onAssistan
         reject(new Error(`voice websocket closed before opening (code ${event.code}: ${event.reason || 'no reason given'}) -- url ${wsUrl}`));
       };
     });
-    ws.onclose = null;
+    // Once connected, keep listening for a close we didn't ask for -- the
+    // server can drop the connection at any point during a call (STT
+    // inactivity timeout, network blip, backend restart), and without this
+    // the UI would just look like a live call forever.
+    ws.onclose = (event) => {
+      if (intentionalCloseRef.current) return;
+      onError?.(`voice call disconnected unexpectedly (code ${event.code}: ${event.reason || 'no reason given'})`);
+      teardown();
+    };
 
     // Explicit constraints rather than relying on browser defaults: without
     // echo cancellation, the mic picks up the bot's own voice from your
@@ -80,30 +114,18 @@ export function useVoiceCall({ sessionId, onUserPartial, onUserFinal, onAssistan
     workletNode.connect(silentGain);
     silentGain.connect(audioContext.destination);
 
+    onStatusChange?.('listening');
     setIsCallActive(true);
-  }, [sessionId, onUserPartial, onUserFinal, onAssistantText, onError]);
+  }, [sessionId, onStatusChange, onError, teardown]);
 
   const endCall = useCallback(() => {
+    intentionalCloseRef.current = true;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'stop' }));
     }
     wsRef.current?.close();
-    wsRef.current = null;
-
-    workletNodeRef.current?.disconnect();
-    workletNodeRef.current = null;
-
-    micStreamRef.current?.getTracks().forEach((track) => track.stop());
-    micStreamRef.current = null;
-
-    audioContextRef.current?.close();
-    audioContextRef.current = null;
-
-    playerRef.current?.close();
-    playerRef.current = null;
-
-    setIsCallActive(false);
-  }, []);
+    teardown();
+  }, [teardown]);
 
   return { isCallActive, startCall, endCall };
 }

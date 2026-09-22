@@ -3,4 +3,5 @@ uvicorn[standard]==0.30.6
 websockets==12.0
 python-dotenv==1.0.1
 anthropic==1.4.0
+openai==3.16.2
 pydantic==2.9.2
